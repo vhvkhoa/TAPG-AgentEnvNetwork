@@ -1,4 +1,4 @@
-# ABN: Agent-Aware Boundary Networks \\ for Temporal Action Proposal Generation
+# ABN: Agent-Aware Boundary Networks for Temporal Action Proposal Generation
 
 This source code is in finalizing process.
 The source code is up-to-date. 
