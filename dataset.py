@@ -119,7 +119,7 @@ class VideoDataSet(Dataset):
         video_lists = list(json_data)
         for video_name in video_lists:
             video_info = json_data[video_name]
-            if not os.path.isfile(os.path.join(self.env_feature_dir, 'v_' + video_name + '.json')):
+            if not os.path.isfile(os.path.join(self.env_feature_dir, 'v_' + video_name + '.npy')):
                 filter_video_names.append(video_name)
                 continue
             if video_info['subset'] != "training":
@@ -184,10 +184,14 @@ class VideoDataSet(Dataset):
         T: number of timestamps
         F: feature size
         '''
+        featmap = torch.tensor(np.load(os.path.join(self.env_feature_dir, video_name + '.npy'), allow_pickle=True))
+        tmprl_dim, feat_dim = featmap.shape[:2]
         if self.use_env is True:
-            env_features = load_json(os.path.join(self.env_feature_dir, video_name + '.json'))['video_features']
+            #env_features = load_json(os.path.join(self.env_feature_dir, video_name + '.json'))['video_features']
             # env_segments = [env['segment'] for env in env_features]
-            env_features = torch.tensor([feature['features'] for feature in env_features]).float().squeeze(1)
+            #env_features = torch.tensor([feature['features'] for feature in env_features]).float().squeeze(1)
+            flatten_featmap = featmap.view(tmprl_dim, feat_dim, -1)
+            env_features = torch.mean(flatten_featmap, dim=-1)
         else:
             env_features = None
 
