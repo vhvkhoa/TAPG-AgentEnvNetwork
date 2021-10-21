@@ -1,4 +1,4 @@
-# ABN: Agent-Aware Boundary Networks for Temporal Action Proposal Generation
+# AEI: Actors-Environment Interaction with Adaptive Attention for Temporal Action Proposals Generation
 
 This source code is in finalizing process.
 
