@@ -132,3 +132,41 @@ def pem_cls_loss_func(pred_score, gt_iou_map, mask):
     loss_neg = coef_0 * torch.log(1.0 - pred_score + epsilon) * nmask
     loss = -1 * torch.sum(loss_pos + loss_neg) / num_entries
     return loss
+
+
+def attention_mining_loss_func(pred_bm, pred_start, pred_end, gt_iou_map, gt_start, gt_end, bm_mask):
+    pred_bm_reg = pred_bm[:, 0].contiguous()
+    pred_bm_cls = pred_bm[:, 1].contiguous()
+
+    gt_iou_map = gt_iou_map * bm_mask
+
+    pem_loss = pem_am_loss_func(pred_bm_cls, pred_bm_reg, gt_iou_map)
+    tem_loss = tem_am_loss_func(pred_start, pred_end, gt_start, gt_end)
+
+    loss = pem_loss + tem_loss
+    return loss, pem_loss, tem_loss
+
+
+def pem_am_loss_func(pred_score_cls, pred_score_reg, gt_iou_map):
+    pmask = (gt_iou_map > 0.9).float()
+
+    num_positive = torch.sum(pmask)
+    loss_cls = pred_score_cls * pmask
+    loss_reg = pred_score_reg * pmask
+    loss = torch.sum(loss_cls + loss_reg) / num_positive
+    return loss
+
+
+def tem_am_loss_func(pred_start, pred_end, gt_start, gt_end):
+    def bi_loss(pred_score, gt_label):
+        pred_score = pred_score.view(-1)
+        gt_label = gt_label.view(-1)
+        pmask = (gt_label > 0.5).float()
+        num_positive = torch.sum(pmask)
+        loss = torch.sum(pred_score * pmask) / num_positive
+        return loss
+
+    loss_start = bi_loss(pred_start, gt_start)
+    loss_end = bi_loss(pred_end, gt_end)
+    loss = loss_start + loss_end
+    return loss

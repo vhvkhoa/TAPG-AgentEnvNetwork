@@ -10,6 +10,7 @@ _C.DATASET = 'anet'
 _C.USE_ENV = True
 _C.USE_AGENT = True
 _C.EVAL_SCORE = 'AUC'
+_C.NUM_WORKERS = 0
 
 _C.TRAIN = CfgNode()
 _C.TRAIN.SPLIT = 'training'
@@ -33,9 +34,12 @@ _C.TEST.CHECKPOINT_PATH = 'checkpoints/c3d_checkpoints/checkpoint_6/best_auc.pth
 
 _C.DATA = CfgNode()
 _C.DATA.ANNOTATION_FILE = '../datasets/activitynet/annotations/activity_net.v1-3.min.json'
+_C.DATA.VIDEO_RESOLUTION_FILE = '../datasets/activitynet/annotations/video_resolutions.json'
 _C.DATA.DETECTION_GT_FILE = None
+_C.DATA.FEATMAP_DIR = '/mnt/data/r3d_feat_maps/'
 _C.DATA.ENV_FEATURE_DIR = '../datasets/activitynet/c3d_env_features/'
 _C.DATA.AGENT_FEATURE_DIR = '../datasets/activitynet/c3d_agent_features/'
+_C.DATA.AGENT_BBOX_DIR = '../datasets/activitynet/agent_bboxes/'
 _C.DATA.CLASSIFICATION_PATH = 'results/classification_results.json'
 _C.DATA.RESULT_PATH = 'results/results.json'
 _C.DATA.FIGURE_PATH = 'results/result_figure.jpg'

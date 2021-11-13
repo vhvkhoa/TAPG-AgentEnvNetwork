@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import math
+from collections import defaultdict
 
 import numpy as np
 
 import torch
+from torch._C import default_generator
 from torch.utils.data.dataset import Dataset
 
 from utils import ioa_with_anchors, iou_with_anchors
@@ -20,25 +23,53 @@ class Collator(object):
     def __init__(self, cfg, mode):
         self.is_train = mode in ['train', 'training']
         if self.is_train:
-            self.batch_names = ['env_feats', 'agent_feats', 'box_lens', 'conf_labels', 'start_labels', 'end_labels']
+            self.batch_names = ['featmap', 'agent_boxes', 'box_lens', 'conf_labels', 'start_labels', 'end_labels']
             self.label_names = ['conf_labels', 'start_labels', 'end_labels']
         else:
-            self.batch_names = ['video_ids', 'env_feats', 'agent_feats', 'box_lens']
+            self.batch_names = ['video_ids', 'featmap', 'agent_boxes', 'box_lens']
             self.label_names = []
-        self.feat_names = ['env_feats', 'agent_feats', 'box_lens']
+        self.feat_names = ['featmap', 'agent_boxes', 'box_lens']
         self.tmp_dim = cfg.DATA.TEMPORAL_DIM
         self.feat_dim = cfg.MODEL.AGENT_DIM
 
-    def process_features(self, bsz, env_feats, agent_feats, box_lens):
+    def process_features(self, bsz, featmaps, agent_boxes, box_lens):
+        '''
         if env_feats[0] is not None:
             env_feats = torch.stack(env_feats)
         else:
             env_feats = None
+        '''
 
         # Make new order to inputs by their lengths (long-to-short)
-        if agent_feats[0] is not None:
+        if agent_boxes[0] is not None:
             box_lens = torch.stack(box_lens, dim=0)
 
+            batch_agent_boxes = []
+            for i, i_agent_boxes in enumerate(agent_boxes):
+                boxes = {}
+                for j, frame_boxes in enumerate(i_agent_boxes):
+                    if len(frame_boxes) > 0:
+                        boxes[j] = torch.tensor(frame_boxes)
+                batch_agent_boxes.append(boxes)
+
+            '''
+            batch_agent_boxes = defaultdict(list) # list of T agent_boxes, each is shaped N x 5
+            for i, agent_i_boxes in enumerate(agent_boxes):
+                for j, frame_boxes in enumerate(agent_i_boxes):
+                    if len(frame_boxes) > 0:
+                        frame_boxes = torch.tensor(frame_boxes)
+                        idx_frame_boxes = torch.cat([
+                            torch.full([
+                                frame_boxes.shape[0], 1], i),
+                                frame_boxes]
+                            , dim=-1
+                        )
+                        batch_agent_boxes[j].append(idx_frame_boxes)
+            for t in sorted(batch_agent_boxes.keys()):
+                batch_agent_boxes[t] = torch.cat(batch_agent_boxes[t], dim=0)
+            '''
+
+            '''
             max_box_dim = torch.max(box_lens).item()
             # Make padding mask for self-attention
             agent_mask = torch.arange(max_box_dim)[None, None, :] < box_lens[:, :, None]
@@ -49,14 +80,14 @@ class Collator(object):
                 for j, box_features in enumerate(temporal_features):
                     if len(box_features) > 0:
                         pad_agent_feats[i, j, :len(box_features)] = torch.tensor(box_features)
+            '''
         else:
-            pad_agent_feats = None
-            agent_mask = None
-        return env_feats, pad_agent_feats, agent_mask
+            batch_agent_boxes = None
+        return featmaps, batch_agent_boxes
 
     def __call__(self, batch):
         input_batch = dict(zip(self.batch_names, zip(*batch)))
-        bsz = len(input_batch['env_feats'])
+        bsz = len(input_batch['featmap'])
         output_batch = [] if self.is_train else [input_batch['video_ids']]
 
         # Process environment and agent features
@@ -73,11 +104,14 @@ class VideoDataSet(Dataset):
         self.split = split
         self.dataset_name = cfg.DATASET
         self.video_anno_path = cfg.DATA.ANNOTATION_FILE
+        self.video_res_path = cfg.DATA.VIDEO_RESOLUTION_FILE
         self.temporal_dim = cfg.DATA.TEMPORAL_DIM
         self.max_duration = cfg.DATA.MAX_DURATION
         self.temporal_gap = 1. / self.temporal_dim
+        self.featmap_dir = cfg.DATA.FEATMAP_DIR
         self.env_feature_dir = cfg.DATA.ENV_FEATURE_DIR
         self.agent_feature_dir = cfg.DATA.AGENT_FEATURE_DIR
+        self.agent_bbox_dir = cfg.DATA.AGENT_BBOX_DIR
 
         self.use_env = cfg.USE_ENV
         self.use_agent = cfg.USE_AGENT
@@ -119,7 +153,7 @@ class VideoDataSet(Dataset):
         video_lists = list(json_data)
         for video_name in video_lists:
             video_info = json_data[video_name]
-            if not os.path.isfile(os.path.join(self.env_feature_dir, 'v_' + video_name + '.npy')):
+            if not os.path.isfile(os.path.join(self.featmap_dir, 'v_' + video_name + '.npy')):
                 filter_video_names.append(video_name)
                 continue
             if video_info['subset'] != "training":
@@ -144,6 +178,7 @@ class VideoDataSet(Dataset):
 
     def _get_dataset(self):
         annotations = load_json(self.video_anno_path)['database']
+        self.video_resolutions = load_json(self.video_res_path)
         if self.dataset_name == 'anet':
             filter_video_names, augment_video_names = self.get_filter_video_names(annotations)
         else:
@@ -168,12 +203,12 @@ class VideoDataSet(Dataset):
         print("Split: %s. Dataset size: %d" % (self.split, len(self.video_ids)))
 
     def __getitem__(self, index):
-        env_features, agent_features, box_lengths = self._load_item(index)
+        featmap, agent_bboxes, box_lengths = self._load_item(index)
         if self.split == 'training':
             match_score_start, match_score_end, confidence_score = self._get_train_label(index)
-            return env_features, agent_features, box_lengths, confidence_score, match_score_start, match_score_end
+            return featmap, agent_bboxes, box_lengths, confidence_score, match_score_start, match_score_end
         else:
-            return self.video_ids[index], env_features, agent_features, box_lengths
+            return self.video_ids[index], featmap, agent_bboxes, box_lengths
 
     def _load_item(self, index):
         video_name = self.video_prefix + self.video_ids[index]
@@ -184,37 +219,49 @@ class VideoDataSet(Dataset):
         T: number of timestamps
         F: feature size
         '''
-        featmap = torch.tensor(np.load(os.path.join(self.env_feature_dir, video_name + '.npy'), allow_pickle=True))
-        tmprl_dim, feat_dim = featmap.shape[:2]
+        '''
         if self.use_env is True:
+            env_features = torch.tensor(np.load(os.path.join(self.env_feature_dir, video_name + '.npy'), allow_pickle=True))
             #env_features = load_json(os.path.join(self.env_feature_dir, video_name + '.json'))['video_features']
             # env_segments = [env['segment'] for env in env_features]
             #env_features = torch.tensor([feature['features'] for feature in env_features]).float().squeeze(1)
-            flatten_featmap = featmap.view(tmprl_dim, feat_dim, -1)
-            env_features = torch.mean(flatten_featmap, dim=-1)
         else:
             env_features = None
+        '''
 
-        '''
-        Read agents features at every timestamp
-        Feature size: TxBxF
-        T: number of timestamps
-        B: max number of bounding boxes
-        F: feature size
-        '''
-        if self.use_agent is True:
-            agent_features = load_json(os.path.join(self.agent_feature_dir, video_name + '.json'))['video_features']
-            # agent_segments = [feature['segment'] for feature in agent_features]
-            agent_features = [feature['features'] for feature in agent_features]
-            # Create and pad agent_box_lengths if train
-            box_lengths = torch.tensor([len(x) for x in agent_features])
+        featmap = torch.tensor(np.load(os.path.join(self.featmap_dir, video_name + '.npy'), allow_pickle=True))
+        width, height = self.video_resolutions[self.video_ids[index]]
+        if width < height:
+            ratio = math.floor(height / width * 256) / height
         else:
-            agent_features = None
+            ratio = math.floor(width / height * 256) / width
+
+        if self.use_agent is True:
+            bboxes = [
+                box['frame_bboxes'] for box in
+                load_json(os.path.join(self.agent_bbox_dir, video_name + '.json'))['video_bboxes']
+            ]
+            agent_bboxes = []
+            for frame_bboxes in bboxes:
+                agent_frame_bboxes = []
+                for box in frame_bboxes:
+                    if box['class_id'] == 0 and box['score'] >= 0.4:
+                        agent_frame_bboxes.append(np.array(box['box']) * ratio)
+                agent_bboxes.append(agent_frame_bboxes)
+            
+            #agent_features = load_json(os.path.join(self.agent_feature_dir, video_name + '.json'))['video_features']
+            # agent_segments = [feature['segment'] for feature in agent_features]
+            #agent_features = [feature['features'] for feature in agent_features]
+            # Create and pad agent_box_lengths if train
+            box_lengths = torch.tensor([len(x) for x in agent_bboxes])
+        else:
+            #agent_features = None
+            agent_bboxes = None
             box_lengths = None
 
         # assert env_segments == agent_segments and len(env_segments) == 100, 'Two streams must have 100 segments.'
 
-        return env_features, agent_features, box_lengths
+        return featmap, agent_bboxes, box_lengths
 
     def _get_train_label(self, index):
         video_id = self.video_ids[index]
