@@ -9,7 +9,7 @@ def load_json(file):
         return data
 
 
-def add_topk_detection(proposals, class_scores, class_names, k=3):
+def add_topk_detection(proposals, class_scores, class_names, k=5):
     topk_indices = class_scores.argsort()[-k:][::-1]
     topk_scores = class_scores[topk_indices]
 
@@ -71,7 +71,6 @@ def get_det_scores(prop_file, cls_file, gt_file, out_file=None, verbose=False, c
     gen_detection(prop_file, cls_file, out_file)
     print("Detection processing finished")
 
-    '''
     from evaluation_anet.eval_detection import ANETdetection
     anet_detection = ANETdetection(
         ground_truth_filename=gt_file,
@@ -83,7 +82,6 @@ def get_det_scores(prop_file, cls_file, gt_file, out_file=None, verbose=False, c
     results = 'Detection: average-mAP {:.3f}.\n'.format(anet_detection.average_mAP * 100) + '\n'.join(mAP_at_tIoU)
     print(results)
     return anet_detection.average_mAP
-    '''
 
 
 if __name__ == "__main__":
